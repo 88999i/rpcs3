@@ -6,6 +6,16 @@
 #include "Emu/Io/usio_config.h"
 #include "Emu/IdManager.h"
 
+#include <deque>
+#include <mutex>
+
+// Taiko hits are captured the instant they're seen in keyboard_pad_handler::process()
+// (i.e. at raw input-poll time) and queued here, instead of being edge-detected once per
+// translate_input_taiko() call. This avoids losing hits that happen between two calls when
+// the game polls slower than the player can hit the drum.
+std::deque<int> g_taiko_queue[2][4];
+std::mutex g_taiko_mutex;
+
 LOG_CHANNEL(usio_log, "USIO");
 
 template <>
@@ -214,8 +224,25 @@ void usb_device_usio::translate_input_taiko()
 	const auto handler = pad::get_pad_thread();
 
 	std::vector<u8> input_buf(0x60);
-	constexpr le_t<u16> c_hit = 0x1800;
 	le_t<u16> digital_input = 0;
+
+	// Taiko hits are reported to the game with an alternating analog level (50/51) so
+	// consecutive hits can be told apart even if the previous value hasn't been re-read yet.
+	static bool value_states[2][4] = {};
+
+	const auto fire_hit = [&](u8* ptr, usz player, usz lane)
+	{
+		if (!ptr)
+			return;
+
+		bool& state = value_states[player][lane];
+		const u16 hit_val = state ? 51 : 50;
+		state = !state;
+
+		const u16 analog_val = (hit_val << 15) / 100 + 1;
+		const le_t<u16> out = analog_val;
+		std::memcpy(ptr, &out, sizeof(u16));
+	};
 
 	const auto translate_from_pad = [&](usz pad_number, usz player)
 	{
@@ -258,20 +285,12 @@ void usb_device_usio::translate_input_taiko()
 						digital_input |= 0x1000;
 					break;
 				case usio_btn::taiko_hit_side_left:
-					if (value.pressed)
-						std::memcpy(input_buf.data() + 32 + offset, &c_hit, sizeof(u16));
-					break;
-				case usio_btn::taiko_hit_center_right:
-					if (value.pressed)
-						std::memcpy(input_buf.data() + 36 + offset, &c_hit, sizeof(u16));
-					break;
-				case usio_btn::taiko_hit_side_right:
-					if (value.pressed)
-						std::memcpy(input_buf.data() + 38 + offset, &c_hit, sizeof(u16));
-					break;
 				case usio_btn::taiko_hit_center_left:
-					if (value.pressed)
-						std::memcpy(input_buf.data() + 34 + offset, &c_hit, sizeof(u16));
+				case usio_btn::taiko_hit_center_right:
+				case usio_btn::taiko_hit_side_right:
+					// Taiko hits are captured at raw input-poll time in
+					// keyboard_pad_handler::process() and consumed from g_taiko_queue
+					// below, so nothing to do with them here.
 					break;
 				case usio_btn::card_tapping:
 					if (value.pressed)
@@ -282,9 +301,43 @@ void usb_device_usio::translate_input_taiko()
 				}
 			});
 		}
+		else if (player < 2)
+		{
+			// Controller disconnected: reset the alternating-value/edge state and drop any
+			// queued hits so a reconnect doesn't fire a stale hit or start on the wrong
+			// alternating value.
+			std::lock_guard<std::mutex> queue_lock(g_taiko_mutex);
+			for (usz lane = 0; lane < 4; lane++)
+			{
+				value_states[player][lane] = false;
+				g_taiko_queue[player][lane].clear();
+			}
+		}
 
 		if (player == 0 && status.test_on)
 			digital_input |= 0x80;
+
+		if (player < 2)
+		{
+			static constexpr usz byte_offset[4] = {32, 34, 36, 38};
+
+			// Queue consumption: exactly one queued hit per lane per call, same as the
+			// known-good usio1.cpp. Hits are pushed into g_taiko_queue at raw input-poll
+			// time by keyboard_pad_handler::process(), independently of how often this
+			// function gets called, so draining one entry here is enough to report every
+			// hit with minimal added latency and without double-firing.
+			std::lock_guard<std::mutex> queue_lock(g_taiko_mutex);
+			for (usz lane = 0; lane < 4; lane++)
+			{
+				auto& queue = g_taiko_queue[player][lane];
+
+				if (!queue.empty())
+				{
+					queue.pop_front();
+					fire_hit(input_buf.data() + byte_offset[lane] + offset, player, lane);
+				}
+			}
+		}
 	};
 
 	for (usz i = 0; i < m_io_status.size(); i++)
@@ -826,8 +879,11 @@ void usb_device_usio::interrupt_transfer(u32 buf_size, u8* buf, u32 endpoint, Us
 
 	transfer->fake            = true;
 	transfer->expected_result = HC_CC_NOERR;
-	// The latency varies per operation but it doesn't seem to matter for this device so let's go fast!
-	transfer->expected_time = get_timestamp() + 1'000;
+	// NOTE: do NOT add an artificial delay here (e.g. get_timestamp() + 1'000).
+	// This transfer carries the controller/taiko input state back to the game, so any
+	// added latency here is added latency on every single input poll. usio1.cpp (the
+	// known-good, zero-latency version) completes this transfer immediately.
+	transfer->expected_time = get_timestamp();
 
 	is_used = true;
 
