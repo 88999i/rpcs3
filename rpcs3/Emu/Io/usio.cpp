@@ -10,14 +10,22 @@
 #include <mutex> // still needed for the pre-existing pad::g_pad_mutex lock_guard usage below
 
 // Taiko hits are captured the instant they're seen in keyboard_pad_handler::process()
-// (i.e. at raw input-poll time) and queued here, instead of being edge-detected once per
+// (i.e. at raw input-poll time) and flagged here, instead of being edge-detected once per
 // translate_input_taiko() call. This avoids losing hits that happen between two calls when
 // the game polls slower than the player can hit the drum.
 //
-// This is a simple lock-free SPSC (single producer / single consumer) counter per lane:
-// keyboard_pad_handler::process() is the only producer (fetch_add on a fresh press), and
-// translate_input_taiko() below is the only consumer (fetch_sub when reporting a hit). No
-// mutex, no heap allocation, no lock contention between the pad thread and the USB thread.
+// This is a lock-free SPSC (single producer / single consumer) *flag* per lane, not a
+// counter: keyboard_pad_handler::process() is the only producer (store(1) on a fresh
+// press), and translate_input_taiko() below is the only consumer (exchange(0) when
+// reporting a hit). It's a flag rather than a counter on purpose: each lane is reported to
+// the game as a single value that flips between two levels (see value_states below), so a
+// poll can only ever communicate ONE hit-edge per lane no matter how many physical hits
+// happened since the last poll (two flips in between two reads cancel out and look like no
+// hit at all). Given that hard ceiling, queueing up a backlog and draining it one-per-poll
+// would just report real hits later and later without ever being able to "catch up" -
+// worse for timing than reporting only the most recent hit immediately and letting any
+// extra, unrepresentable hits go. No mutex, no heap allocation, no lock contention between
+// the pad thread and the USB thread.
 std::atomic<u32> g_taiko_pending[2][4]{};
 
 LOG_CHANNEL(usio_log, "USIO");
@@ -324,20 +332,18 @@ void usb_device_usio::translate_input_taiko()
 		{
 			static constexpr usz byte_offset[4] = {32, 34, 36, 38};
 
-			// Consumption: exactly one pending hit per lane per call, same design as the
-			// known-good usio1.cpp (just backed by an atomic counter instead of a
-			// mutex-protected deque). Hits are incremented at raw input-poll time by
-			// keyboard_pad_handler::process(), independently of how often this function
-			// gets called, so draining one per call is enough to report every hit with
-			// minimal added latency and without double-firing. No lock needed: this is a
-			// single-producer/single-consumer counter per lane.
+			// Consumption: at most one hit per lane per call, reporting the *most recent*
+			// press. Same design intent as the known-good usio1.cpp, but using
+			// exchange(0) on a flag instead of draining a queue/counter one entry at a
+			// time - see the comment on g_taiko_pending above for why a backlog can't
+			// usefully be drained slower than one-per-poll anyway. No lock needed: this is
+			// a single-producer/single-consumer flag per lane.
 			for (usz lane = 0; lane < 4; lane++)
 			{
 				auto& pending = g_taiko_pending[player][lane];
 
-				if (pending.load(std::memory_order_acquire) > 0)
+				if (pending.exchange(0, std::memory_order_acq_rel))
 				{
-					pending.fetch_sub(1, std::memory_order_acq_rel);
 					fire_hit(input_buf.data() + byte_offset[lane] + offset, player, lane);
 				}
 			}
