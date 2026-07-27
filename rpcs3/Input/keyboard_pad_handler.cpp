@@ -1404,7 +1404,7 @@ void keyboard_pad_handler::process()
 					const u32 player_idx = pad->m_player_id;
 					if (player_idx < 2)
 					{
-						g_taiko_pending[player_idx][lane].fetch_add(1, std::memory_order_release);
+						g_taiko_pending[player_idx][lane].store(1, std::memory_order_release);
 					}
 				}
 			}
