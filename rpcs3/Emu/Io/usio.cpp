@@ -5,7 +5,7 @@
 #include "Input/pad_thread.h"
 #include "Emu/Io/usio_config.h"
 #include "Emu/IdManager.h"
-#include "Emu/Cell/timers.hpp" // TEMPORARY: for get_system_time() debug logging below
+#include "Emu/Cell/timers.hpp" // for get_system_time() used by the debug logging below
 
 #include <atomic>
 #include <mutex> // still needed for the pre-existing pad::g_pad_mutex lock_guard usage below
@@ -30,6 +30,21 @@
 std::atomic<u32> g_taiko_pending[2][4]{};
 
 LOG_CHANNEL(usio_log, "USIO");
+
+// Writes straight to <RPCS3 log dir>/taiko_filtered.txt, bypassing the LOG_CHANNEL system
+// entirely, so output always appears regardless of the "USIO" channel's configured log
+// level (usio_log.trace(...) requires that channel to be manually set to Trace in Log
+// Manager, otherwise it's silently dropped).
+static void log_taiko_filtered(const std::string& line)
+{
+	fs::file file;
+
+	if (file.open(fs::get_log_dir() + "taiko_filtered.txt", fs::create + fs::write + fs::append))
+	{
+		file.write(line.data(), line.size());
+		file.write("\n", 1);
+	}
+}
 
 template <>
 void fmt_class_string<usio_btn>::format(std::string& out, u64 arg)
@@ -236,10 +251,9 @@ void usb_device_usio::translate_input_taiko()
 	std::lock_guard lock(pad::g_pad_mutex);
 	const auto handler = pad::get_pad_thread();
 
-	// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
+	// DEBUG LOGGING - writes to <RPCS3 log dir>/taiko_filtered.txt.
 	// Logs every time this function is polled, so the gap between calls can be measured.
-	// Enable with: Log Manager -> "USIO" channel -> Trace.
-	usio_log.trace("taiko poll t=%d us", get_system_time());
+	log_taiko_filtered(fmt::format("taiko poll t=%d us", get_system_time()));
 
 	std::vector<u8> input_buf(0x60);
 	le_t<u16> digital_input = 0;
@@ -261,9 +275,9 @@ void usb_device_usio::translate_input_taiko()
 		const le_t<u16> out = analog_val;
 		std::memcpy(ptr, &out, sizeof(u16));
 
-		// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
+		// DEBUG LOGGING - writes to <RPCS3 log dir>/taiko_filtered.txt.
 		static constexpr const char* lane_names[4] = {"side_left(ka)", "center_left(don)", "center_right(don)", "side_right(ka)"};
-		usio_log.trace("taiko HIT t=%d us player=%d lane=%s", get_system_time(), player, lane_names[lane]);
+		log_taiko_filtered(fmt::format("taiko HIT t=%d us player=%d lane=%s", get_system_time(), player, lane_names[lane]));
 	};
 
 	const auto translate_from_pad = [&](usz pad_number, usz player)
