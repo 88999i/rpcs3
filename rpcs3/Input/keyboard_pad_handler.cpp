@@ -10,7 +10,7 @@
 #include <atomic>
 #include <QApplication>
 
-// usio.cpp で定義されているロックフリーのカウンタを利用する宣言
+// Declaration to use the lock-free counter defined in usio.cpp
 extern std::atomic<u32> g_taiko_pending[2][4];
 
 bool keyboard_pad_handler::Init()
