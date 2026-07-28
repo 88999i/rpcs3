@@ -7,7 +7,7 @@ on:
   push:
     branches:
       - master # Only trigger push event on 'master' branch
-      - lv3
+      - lv3.2
   pull_request:
   workflow_dispatch:
 
