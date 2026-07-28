@@ -3,7 +3,9 @@
 #include "Emu/Io/pad_config.h"
 #include "Emu/Io/KeyboardHandler.h"
 #include "Emu/Io/interception.h"
-#include "Emu/Cell/timers.hpp" // TEMPORARY: for get_system_time() debug logging below
+#include "Emu/Cell/timers.hpp" // for get_system_time() used by the debug logging below
+#include "Utilities/File.h" // for fs::file used by the debug logging below
+#include "Utilities/StrFmt.h" // for fmt::format used by the debug logging below
 #include "Input/product_info.h"
 #include "rpcs3qt/gs_frame.h"
 
@@ -13,6 +15,22 @@
 
 // usio.cpp で定義されているロックフリーのカウンタを利用する宣言
 extern std::atomic<u32> g_taiko_pending[2][4];
+
+// Writes straight to <RPCS3 log dir>/taiko_filtered.txt, same file and format that
+// usio.cpp's log_taiko_filtered() writes "taiko HIT" lines to. This one writes "taiko
+// DETECT" lines at the moment a fresh key edge is seen here (before it even reaches
+// g_taiko_pending), so the two can be diffed per lane to measure end-to-end delay from
+// keypress to USIO reporting it to the game.
+static void log_taiko_filtered(const std::string& line)
+{
+	fs::file file;
+
+	if (file.open(fs::get_log_dir() + "taiko_filtered.txt", fs::create + fs::write + fs::append))
+	{
+		file.write(line.data(), line.size());
+		file.write("\n", 1);
+	}
+}
 
 bool keyboard_pad_handler::Init()
 {
@@ -1407,9 +1425,9 @@ void keyboard_pad_handler::process()
 					{
 						g_taiko_pending[player_idx][lane].store(1, std::memory_order_release);
 
-						// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
+						// DEBUG LOGGING - writes to <RPCS3 log dir>/taiko_filtered.txt.
 						static constexpr const char* lane_names[4] = {"side_left(ka)", "center_left(don)", "center_right(don)", "side_right(ka)"};
-						input_log.trace("taiko DETECT t=%d us player=%d lane=%s", get_system_time(), player_idx, lane_names[lane]);
+						log_taiko_filtered(fmt::format("taiko DETECT t=%d us player=%d lane=%s", get_system_time(), player_idx, lane_names[lane]));
 					}
 				}
 			}
