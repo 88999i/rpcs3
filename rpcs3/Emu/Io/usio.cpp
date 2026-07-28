@@ -235,6 +235,11 @@ void usb_device_usio::translate_input_taiko()
 	std::lock_guard lock(pad::g_pad_mutex);
 	const auto handler = pad::get_pad_thread();
 
+	// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
+	// Logs every time this function is polled, so the gap between calls can be measured.
+	// Enable with: Log Manager -> "USIO" channel -> Trace.
+	usio_log.trace("taiko poll t=%d us", get_timestamp());
+
 	std::vector<u8> input_buf(0x60);
 	le_t<u16> digital_input = 0;
 
@@ -254,6 +259,10 @@ void usb_device_usio::translate_input_taiko()
 		const u16 analog_val = (hit_val << 15) / 100 + 1;
 		const le_t<u16> out = analog_val;
 		std::memcpy(ptr, &out, sizeof(u16));
+
+		// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
+		static constexpr const char* lane_names[4] = {"side_left(ka)", "center_left(don)", "center_right(don)", "side_right(ka)"};
+		usio_log.trace("taiko HIT t=%d us player=%d lane=%s", get_timestamp(), player, lane_names[lane]);
 	};
 
 	const auto translate_from_pad = [&](usz pad_number, usz player)
