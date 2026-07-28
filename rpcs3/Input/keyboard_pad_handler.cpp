@@ -3,6 +3,7 @@
 #include "Emu/Io/pad_config.h"
 #include "Emu/Io/KeyboardHandler.h"
 #include "Emu/Io/interception.h"
+#include "Emu/Io/usb_device.h" // TEMPORARY: for usb_device::get_timestamp() debug logging below
 #include "Input/product_info.h"
 #include "rpcs3qt/gs_frame.h"
 
@@ -1405,6 +1406,10 @@ void keyboard_pad_handler::process()
 					if (player_idx < 2)
 					{
 						g_taiko_pending[player_idx][lane].store(1, std::memory_order_release);
+
+						// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
+						static constexpr const char* lane_names[4] = {"side_left(ka)", "center_left(don)", "center_right(don)", "side_right(ka)"};
+						input_log.trace("taiko DETECT t=%d us player=%d lane=%s", usb_device::get_timestamp(), player_idx, lane_names[lane]);
 					}
 				}
 			}
