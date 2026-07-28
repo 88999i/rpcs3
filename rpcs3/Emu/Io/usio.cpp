@@ -5,6 +5,7 @@
 #include "Input/pad_thread.h"
 #include "Emu/Io/usio_config.h"
 #include "Emu/IdManager.h"
+#include "Emu/Cell/timers.hpp" // TEMPORARY: for get_system_time() debug logging below
 
 #include <atomic>
 #include <mutex> // still needed for the pre-existing pad::g_pad_mutex lock_guard usage below
@@ -238,7 +239,7 @@ void usb_device_usio::translate_input_taiko()
 	// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
 	// Logs every time this function is polled, so the gap between calls can be measured.
 	// Enable with: Log Manager -> "USIO" channel -> Trace.
-	usio_log.trace("taiko poll t=%d us", get_timestamp());
+	usio_log.trace("taiko poll t=%d us", get_system_time());
 
 	std::vector<u8> input_buf(0x60);
 	le_t<u16> digital_input = 0;
@@ -262,7 +263,7 @@ void usb_device_usio::translate_input_taiko()
 
 		// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
 		static constexpr const char* lane_names[4] = {"side_left(ka)", "center_left(don)", "center_right(don)", "side_right(ka)"};
-		usio_log.trace("taiko HIT t=%d us player=%d lane=%s", get_timestamp(), player, lane_names[lane]);
+		usio_log.trace("taiko HIT t=%d us player=%d lane=%s", get_system_time(), player, lane_names[lane]);
 	};
 
 	const auto translate_from_pad = [&](usz pad_number, usz player)
