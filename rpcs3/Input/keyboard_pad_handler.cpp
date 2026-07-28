@@ -3,7 +3,7 @@
 #include "Emu/Io/pad_config.h"
 #include "Emu/Io/KeyboardHandler.h"
 #include "Emu/Io/interception.h"
-#include "Emu/Io/usb_device.h" // TEMPORARY: for usb_device::get_timestamp() debug logging below
+#include "Emu/Cell/timers.hpp" // TEMPORARY: for get_system_time() debug logging below
 #include "Input/product_info.h"
 #include "rpcs3qt/gs_frame.h"
 
@@ -1409,7 +1409,7 @@ void keyboard_pad_handler::process()
 
 						// TEMPORARY DEBUG LOGGING - remove once the timing investigation is done.
 						static constexpr const char* lane_names[4] = {"side_left(ka)", "center_left(don)", "center_right(don)", "side_right(ka)"};
-						input_log.trace("taiko DETECT t=%d us player=%d lane=%s", usb_device::get_timestamp(), player_idx, lane_names[lane]);
+						input_log.trace("taiko DETECT t=%d us player=%d lane=%s", get_system_time(), player_idx, lane_names[lane]);
 					}
 				}
 			}
